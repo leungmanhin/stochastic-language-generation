@@ -313,7 +313,10 @@
     (weighted-pick
       candidate-sections
       (map
-        (lambda (s) (cog-tv-count (cog-tv s)))
+        ; Use fractional mutual information
+        (lambda (s) (get-fmi s))
+        ; Use frequency
+        ; (lambda (s) (cog-tv-count (cog-tv s)))
         candidate-sections)))
 
   (format #t "\n>> ~a (~d) <<\n"
@@ -752,3 +755,9 @@
     (or (equal? wcp wc)
         (word-in-class? wcp wc)
         (word-in-class? wc wcp))))
+
+(define (get-fmi atom)
+  (define val (cog-value atom (Predicate "*-Mutual Info Key-*")))
+  (if (null? val)
+    -inf.0
+    (cog-value-ref val 1)))
