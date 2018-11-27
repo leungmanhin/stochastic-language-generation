@@ -20,6 +20,7 @@
 ; ---------- Shared ---------- ;
 ; The LEFT-WALL (the beginning of a sentence)
 (define left-wall "###LEFT-WALL###")
+(define right-wall "###RIGHT-WALL###")
 
 ; Some internal states
 (define complete? #f)
@@ -206,6 +207,105 @@
                  (string=? "###RIGHT-WALL###" nstr))))
       (car (sent-get-words-in-order sent-node)))))
 
+(define*-public (slg-expand sentence #:optional (lg-dict "en"))
+"
+  slg-expand SENTENCE [LG-DICT]
+"
+  ; Parse the sentence using the given dictionary
+  (define sent-node
+    (cog-execute!
+      (LgParse
+        (Phrase sentence)
+        (LgDict lg-dict)
+        (Number 1))))
+
+  ; Get all the WordInstandeNodes in order
+  (define word-inst-nodes
+    (car (sent-get-words-in-order sent-node)))
+
+  ; Get the full list of words of the sentence, with
+  ; ###RIGHT-WALL### removed
+  (define word-nodes
+    (map
+      word-inst-get-word
+      (filter
+        (lambda (wi)
+          (not (string=?
+            right-wall
+            (cog-name (word-inst-get-word wi)))))
+        word-inst-nodes)))
+
+  ; Get all the LG-links in the parse
+  (define lg-links
+    (cog-outgoing-set
+      (cog-execute!
+        (Bind
+          (VariableList
+            (TypedVariable
+              (Variable "$parse")
+              (Type "ParseNode"))
+            (TypedVariable
+              (Variable "$lg")
+              (Type "LgLinkInstanceNode"))
+            (TypedVariable
+              (Variable "$word-inst-1")
+              (Type "WordInstanceNode"))
+            (TypedVariable
+              (Variable "$word-inst-2")
+              (Type "WordInstanceNode")))
+          (And
+            (Parse
+              (Variable "$parse")
+              sent-node)
+            (WordInstance
+              (Variable "$word-inst-1")
+              (Variable "$parse"))
+            (WordInstance
+              (Variable "$word-inst-2")
+              (Variable "$parse"))
+            (Evaluation
+              (Variable "$lg")
+              (List
+                (Variable "$word-inst-1")
+                (Variable "$word-inst-2"))))
+          (Evaluation
+            (Variable "$lg")
+            (List
+              (Variable "$word-inst-1")
+              (Variable "$word-inst-2")))))))
+
+  ; Turn the LG-links into index-pairs
+  (define links
+    (append-map
+      (lambda (eval)
+        (if (and
+              (string=?
+                left-wall
+                (cog-name (word-inst-get-word (gadr eval))))
+              (string=?
+                right-wall
+                (cog-name (word-inst-get-word (gddr eval)))))
+          (list)
+          (list
+            (cons
+              (list-index
+                (lambda (x) (equal? x (gadr eval)))
+                word-inst-nodes)
+              (list-index
+                (lambda (x) (equal? x (gddr eval)))
+                word-inst-nodes)))))
+      lg-links))
+
+  (generate
+    word-nodes
+    links
+    ; List of unexplored words is empty, to maximize the chance
+    ; of adding new words in the sentence
+    (list)
+    ; LEFT-WALL will be added to the sentence anyway, even though
+    ; the sentence cannot be parsed successfully
+    #t)
+)
 
 ; ---------- Main ---------- ;
 ; Will be called recursively until the generation is complete
