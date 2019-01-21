@@ -90,8 +90,8 @@
   Replace one or more words in SENTENCE with other words that
   belong to the same linguistic categories.
 
-  It's assumed that words with the same link at the same position (left/right)
-  are in the same category. For example:
+  It's assumed that words with the same disjunct are in the same category.
+  For example:
 
     +-Ss*b+      +-Ss*b+
     |     |      |     |
@@ -108,79 +108,57 @@
   placed under \"/usr/local/share/link-grammar\", with all the other required
   files (like those 4.0.*) in place already.
 "
-  (define (generate-output-sentence word-instances)
+  (define (generate-output-sentence words)
     (string-join
       (map
-        (lambda (wi) (cog-name (word-inst-get-word wi)))
-        word-instances)))
+        (lambda (w)
+          (cog-name
+            (if (equal? 'WordInstanceNode (cog-type w))
+              (word-inst-get-word w) w)))
+        words)))
 
   (define* (pick-and-replace words #:optional (new-sent words))
-    ; Randomly pick a word from the word list
+    ; Randomly pick a word instance from the list
     (define chosen-word (rand-pick words))
 
-    ; Get the categories that the chosen word belongs to, in the form
-    ; of EvaluationLinks
-    (define categories
-      (cog-get-pred chosen-word 'LinkGrammarRelationshipNode))
+    ; Get the connector-set that the chosen word belongs to
+    (define cset (gdr (car (cog-incoming-by-type chosen-word 'LgWordCset))))
 
-    ; Randomly pick a category from the category list
-    (define chosen-category (rand-pick categories))
+    ; See if there is any other word in the AtomSpace that has the same disjunct
+    (define candidates
+      (filter
+        (lambda (w) (not (equal? w (word-inst-get-word chosen-word))))
+        (cog-chase-link 'LgDisjunct 'WordNode cset)))
 
-    ; Check if the chosen word is the source of the chosen LG relationship
-    (define is-source? (equal? (gadr chosen-category) chosen-word))
+    (format #t "Chosen word: \"~a\"\n" (cog-name (word-inst-get-word chosen-word)))
 
-    ; Find other members of the chosen category
-    (define members
-      (delete-duplicates
-        (filter
-          (lambda (m)
-            (not (equal?
-              (word-inst-get-word chosen-word)
-              (word-inst-get-word m))))
-          (map
-            (lambda (l) (if is-source? (gar l) (gdr l)))
-            (cog-outgoing-set
-              (cog-execute!
-                (Get
-                  (VariableList
-                    (TypedVariable
-                      (Variable "$source")
-                      (Type "WordInstanceNode"))
-                    (TypedVariable
-                      (Variable "$target")
-                      (Type "WordInstanceNode")))
-                  (Evaluation
-                    (gar chosen-category)
-                    (List
-                      (Variable "$source")
-                      (Variable "$target"))))))))
-        (lambda (x y)
-          (equal? (word-inst-get-word x) (word-inst-get-word y)))))
-
-    (if (null? members)
-      ; If there is no other members in the same category,
-      ; try again with a different word! Unless there is
-      ; no more unexplored words.
+    (if (null? candidates)
+      ; If no candidate is found, try again with a different word
+      ; unless there is no more to be explored
       (begin
-        (format #t "No members found form \"~a\"\nSentence: ~a\n"
-          (cog-name (gar chosen-category))
-          (map cog-name (map word-inst-get-word new-sent)))
+        (format #t "No candidate found having:\n~a" cset)
         (if (= 1 (length words))
           (generate-output-sentence new-sent)
           (pick-and-replace (delete chosen-word words) new-sent)))
       ; Otherwise, replace the word in the sentence with
-      ; the chosen member.
-      (let* ((chosen-member (rand-pick members))
+      ; the chosen candidates
+      (let* ((chosen-candidate (rand-pick candidates))
              (words-replaced
                (map
-                 (lambda (wi) (if (equal? chosen-word wi) chosen-member wi))
+                 (lambda (wi) (if (equal? chosen-word wi) chosen-candidate wi))
                  new-sent)))
-        (format #t "---> Replacing \"~a\" with \"~a\" from \"~a\"\nSentence: ~a\n"
+
+        (format #t "---> Replacing \"~a\" with \"~a\"\nDisjunct:\n~a\nSentence: ~a\n"
           (cog-name (word-inst-get-word chosen-word))
-          (cog-name (word-inst-get-word chosen-member))
-          (cog-name (gar chosen-category))
-          (map cog-name (map word-inst-get-word words-replaced)))
-        ; Randomly decide whether to continue the process or end it here.
+          (cog-name chosen-candidate)
+          cset
+          (map cog-name
+            (map
+              (lambda (w)
+                ; The replaced ones are WordNodes while the others are WordInstanceNodes
+                (if (equal? 'WordInstanceNode (cog-type w)) (word-inst-get-word w) w))
+              words-replaced)))
+        ; Decide randomly whether to continue the process or end it here
         (if (and (occur? 0.5) (> (length words) 1))
           (pick-and-replace (delete chosen-word words) words-replaced)
           (generate-output-sentence words-replaced)))))
